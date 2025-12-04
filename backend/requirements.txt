@@ -1,0 +1,32 @@
+# SentinelOps-Nexus Backend Dependencies - Phase 1
+
+# FastAPI Framework
+fastapi
+uvicorn[standard]
+python-multipart
+
+# Database
+motor                    # Async MongoDB driver
+pymongo                  # MongoDB utilities
+
+# Authentication & Security
+python-jose[cryptography]  # JWT tokens
+passlib[bcrypt]          # Password hashing
+bcrypt                   # Bcrypt support
+
+# QR Code Generation
+qrcode[pil]              # QR code generation
+Pillow                  # Image processing
+
+# Configuration
+pydantic                 # Data validation
+pydantic-settings        # Settings management
+python-dotenv            # Environment variables
+
+# Utilities
+python-dateutil          # Date utilities
+
+# Development Tools (Optional)
+pytest                   # Testing
+pytest-asyncio          # Async testing
+httpx                   # HTTP client for testing

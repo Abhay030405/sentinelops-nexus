@@ -1,0 +1,66 @@
+"""
+MongoDB Database Connection Manager
+Handles async connection to MongoDB using Motor
+"""
+
+from motor.motor_asyncio import AsyncIOMotorClient
+from app.config.settings import settings
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+class Database:
+    client: AsyncIOMotorClient = None
+    db = None
+
+
+db = Database()
+
+
+async def connect_to_mongo():
+    """Establish connection to MongoDB"""
+    try:
+        db.client = AsyncIOMotorClient(settings.MONGODB_URL)
+        db.db = db.client[settings.MONGODB_DB_NAME]
+        
+        # Test connection
+        await db.client.server_info()
+        logger.info("✅ Successfully connected to MongoDB")
+        logger.info(f"📊 Database: {settings.MONGODB_DB_NAME}")
+        
+        # Create indexes
+        await create_indexes()
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to connect to MongoDB: {e}")
+        raise
+
+
+async def close_mongo_connection():
+    """Close MongoDB connection"""
+    if db.client:
+        db.client.close()
+        logger.info("🔴 MongoDB connection closed")
+
+
+async def create_indexes():
+    """Create database indexes for better performance"""
+    try:
+        # Users collection indexes
+        await db.db.users.create_index("username", unique=True)
+        await db.db.users.create_index("qr_token", unique=True)
+        
+        # Identity logs collection indexes
+        await db.db.identity_logs.create_index("username")
+        await db.db.identity_logs.create_index("timestamp")
+        await db.db.identity_logs.create_index([("timestamp", -1)])  # Descending for recent logs
+        
+        logger.info("✅ Database indexes created successfully")
+    except Exception as e:
+        logger.warning(f"⚠️ Index creation warning: {e}")
+
+
+def get_database():
+    """Get database instance"""
+    return db.db

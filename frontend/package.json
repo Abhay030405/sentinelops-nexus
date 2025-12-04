@@ -1,12 +1,13 @@
 {
-  "name": "frontend",
+  "name": "sentinelops-nexus-frontend",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
+  "description":"SentinelOps-Nexus Frontend - Power Rangers Edition",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "lint": "eslint .",
+    "lint": "eslint src --ext js,jsx",
     "preview": "vite preview"
   },
   "dependencies": {
