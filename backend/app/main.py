@@ -1,40 +1,20 @@
-"""
-SentinelOps-Nexus Backend - Phase 1
-FastAPI Main Application Entry Point
-"""
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from contextlib import asynccontextmanager
-
-from app.database.mongodb import connect_to_mongo, close_mongo_connection
-from app.identity_vault.routes import router as identity_router
 from app.config.settings import settings
+from app.database.mongodb import connect_to_mongo, close_mongo_connection
+from app.doc_sage.routes import router as doc_sage_router
+from app.knowledge_crystal.routes import router as kb_router
+from app.knowledge_crystal.embedding_service import init_embedding_service
+from app.knowledge_crystal.vector_store import init_vector_store
 
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Startup and shutdown events"""
-    # Startup
-    await connect_to_mongo()
-    print("🚀 SentinelOps-Nexus Backend Online!")
-    print(f"⚡ Morphin Grid Status: ACTIVE")
-    print(f"🔵 MongoDB Connected: {settings.MONGODB_URL}")
-    yield
-    # Shutdown
-    await close_mongo_connection()
-    print("🔴 Power Down Complete")
-
-
-# Initialize FastAPI app
+# Create FastAPI app
 app = FastAPI(
-    title="SentinelOps-Nexus API",
-    description="Phase 1: Identity Vault & Authentication System - Power Rangers Edition",
-    version="1.0.0",
-    lifespan=lifespan
+    title=settings.APP_NAME,
+    version=settings.APP_VERSION,
+    description="Power Rangers Sentinel"
 )
 
-# CORS Configuration
+# CORS Middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
@@ -43,37 +23,44 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Startup event
+@app.on_event("startup")
+async def startup_event():
+    print("🚀 Starting Doc-Sage Intel Console...")
+    await connect_to_mongo()
+    print("✅ MongoDB connected!")
+    
+    # Initialize Knowledge Crystal services
+    print("🔮 Initializing Knowledge Crystal...")
+    try:
+        init_embedding_service()
+        print("✅ Embedding Service initialized")
+        
+        init_vector_store()
+        print("✅ Vector Store initialized")
+    except Exception as e:
+        print(f"⚠️ Knowledge Crystal initialization warning: {e}")
+    
+    print("✅ Doc-Sage & Knowledge Crystal are ready!")
+
+# Shutdown event
+@app.on_event("shutdown")
+async def shutdown_event():
+    await close_mongo_connection()
+
 # Include routers
-app.include_router(identity_router, prefix="/api/v1", tags=["Identity Vault"])
+app.include_router(doc_sage_router)
+app.include_router(kb_router)
 
-
+# Health check endpoint
 @app.get("/")
 async def root():
-    """Health check endpoint"""
     return {
+        "message": "🎯 Doc-Sage Intel Console API",
         "status": "online",
-        "message": "🔥 It's Morphin Time! SentinelOps-Nexus API is ready!",
-        "phase": "1 - Identity Vault",
-        "version": "1.0.0"
+        "version": settings.APP_VERSION
     }
-
 
 @app.get("/health")
 async def health_check():
-    """Detailed health check"""
-    return {
-        "status": "healthy",
-        "morphin_grid": "active",
-        "command_center": "operational",
-        "database": "connected"
-    }
-
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True
-    )
+    return {"status": "healthy", "service": "doc-sage"}

@@ -30,3 +30,4 @@ python-dateutil          # Date utilities
 pytest                   # Testing
 pytest-asyncio          # Async testing
 httpx                   # HTTP client for testing
+dnspython

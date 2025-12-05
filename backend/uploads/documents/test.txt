@@ -1,0 +1,337 @@
+"""
+Doc-Sage Backend Testing Script
+Test all API endpoints and functionality
+"""
+
+import asyncio
+import aiohttp
+import json
+from pathlib import Path
+import time
+
+# Configuration
+BASE_URL = "http://localhost:8000"
+API_PREFIX = "/api/documents"
+
+class Colors:
+    """ANSI color codes"""
+    BLUE = '\033[94m'
+    GREEN = '\033[92m'
+    RED = '\033[91m'
+    YELLOW = '\033[93m'
+    CYAN = '\033[96m'
+    RESET = '\033[0m'
+    BOLD = '\033[1m'
+
+def print_header(text):
+    print(f"\n{Colors.CYAN}{Colors.BOLD}{'='*60}")
+    print(f"{text}")
+    print(f"{'='*60}{Colors.RESET}\n")
+
+def print_success(text):
+    print(f"{Colors.GREEN}✅ {text}{Colors.RESET}")
+
+def print_error(text):
+    print(f"{Colors.RED}❌ {text}{Colors.RESET}")
+
+def print_info(text):
+    print(f"{Colors.BLUE}ℹ️  {text}{Colors.RESET}")
+
+def print_warning(text):
+    print(f"{Colors.YELLOW}⚠️  {text}{Colors.RESET}")
+
+async def test_health_check():
+    """Test API health"""
+    print_header("1. Testing API Health Check")
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"{BASE_URL}/docs") as resp:
+                if resp.status == 200:
+                    print_success("API is running!")
+                    return True
+                else:
+                    print_error(f"API returned status {resp.status}")
+                    return False
+    except Exception as e:
+        print_error(f"Failed to connect to API: {e}")
+        print_warning("Make sure backend is running: uvicorn app.main:app --reload --port 8000")
+        return False
+
+async def test_upload_document():
+    """Test document upload"""
+    print_header("2. Testing Document Upload")
+    
+    # Create a test file
+    test_file_path = Path("test_document.txt")
+    test_file_path.write_text("This is a test document for Doc-Sage backend testing.\n"
+                             "It contains information about Power Rangers Zord maintenance.\n"
+                             "The Zord system requires regular maintenance and coolant refills.\n"
+                             "Emergency protocols must be followed during system failures.\n"
+                             "All technicians must complete safety certification before operation.")
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            with open(test_file_path, 'rb') as f:
+                form_data = aiohttp.FormData()
+                form_data.add_field('file', f, filename='test_document.txt')
+                
+                print_info(f"Uploading {test_file_path.name}...")
+                async with session.post(f"{BASE_URL}{API_PREFIX}/upload", data=form_data) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        print_success(f"Upload successful!")
+                        print(f"  Document ID: {Colors.BOLD}{data['id']}{Colors.RESET}")
+                        print(f"  Name: {data['name']}")
+                        print(f"  Status: {data['status']}")
+                        return data['id']
+                    else:
+                        error_text = await resp.text()
+                        print_error(f"Upload failed (Status {resp.status}): {error_text}")
+                        return None
+    except Exception as e:
+        print_error(f"Upload error: {e}")
+        return None
+    finally:
+        if test_file_path.exists():
+            test_file_path.unlink()
+
+async def test_get_document_status(doc_id):
+    """Test getting document status"""
+    print_header("3. Testing Get Document Status (with polling)")
+    
+    if not doc_id:
+        print_warning("Skipping - no valid document ID")
+        return False
+    
+    max_attempts = 30  # 30 attempts
+    attempt = 0
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            while attempt < max_attempts:
+                attempt += 1
+                print_info(f"Checking status (attempt {attempt}/{max_attempts})...")
+                
+                async with session.get(f"{BASE_URL}{API_PREFIX}/{doc_id}/summary") as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        status = data.get('status', 'unknown')
+                        
+                        print(f"  Status: {Colors.BOLD}{status}{Colors.RESET}")
+                        
+                        if status == "processed":
+                            print_success("Document fully processed!")
+                            print(f"\n  {Colors.BOLD}Summary:{Colors.RESET}")
+                            print(f"    Short: {data.get('summary', {}).get('short_summary', 'N/A')[:100]}...")
+                            print(f"\n  {Colors.BOLD}Keywords:{Colors.RESET}")
+                            keywords = data.get('summary', {}).get('keywords', [])
+                            print(f"    {', '.join(keywords[:5])}")
+                            return True
+                        elif status == "processing":
+                            print_info("Still processing... waiting 2 seconds")
+                            await asyncio.sleep(2)
+                        else:
+                            print_warning(f"Document status: {status}")
+                            return False
+                    else:
+                        print_warning(f"Status check returned {resp.status}")
+                        await asyncio.sleep(2)
+            
+            print_warning("Timeout: Document processing took too long")
+            return False
+    
+    except Exception as e:
+        print_error(f"Status check error: {e}")
+        return False
+
+async def test_search_documents(search_query="Zord"):
+    """Test document search"""
+    print_header("4. Testing Document Search")
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            print_info(f"Searching for: '{search_query}'")
+            async with session.get(f"{BASE_URL}{API_PREFIX}/search", params={"q": search_query}) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    total = data.get('total_results', 0)
+                    
+                    if total > 0:
+                        print_success(f"Found {total} matching document(s)!")
+                        results = data.get('results', [])
+                        for i, result in enumerate(results[:3], 1):  # Show first 3
+                            print(f"\n  Result {i}:")
+                            print(f"    Name: {result.get('name', 'N/A')}")
+                            print(f"    Summary: {result.get('summary', 'N/A')[:80]}...")
+                            print(f"    Keywords: {', '.join(result.get('keywords', [])[:3])}")
+                        return True
+                    else:
+                        print_info("No documents found matching search")
+                        return True
+                else:
+                    error_text = await resp.text()
+                    print_error(f"Search failed (Status {resp.status}): {error_text}")
+                    return False
+    except Exception as e:
+        print_error(f"Search error: {e}")
+        return False
+
+async def test_get_all_documents():
+    """Test getting all documents"""
+    print_header("5. Testing Get All Documents")
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            print_info("Fetching all documents...")
+            async with session.get(f"{BASE_URL}{API_PREFIX}") as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    count = len(data)
+                    
+                    if count > 0:
+                        print_success(f"Found {count} document(s)")
+                        for i, doc in enumerate(data[:3], 1):
+                            print(f"\n  Document {i}:")
+                            print(f"    ID: {doc.get('_id', 'N/A')}")
+                            print(f"    Name: {doc.get('name', 'N/A')}")
+                            print(f"    Status: {doc.get('status', 'N/A')}")
+                            print(f"    Uploaded by: {doc.get('uploaded_by', 'N/A')}")
+                        return True
+                    else:
+                        print_info("No documents in database yet")
+                        return True
+                else:
+                    error_text = await resp.text()
+                    print_error(f"Get all failed (Status {resp.status}): {error_text}")
+                    return False
+    except Exception as e:
+        print_error(f"Get all error: {e}")
+        return False
+
+async def test_delete_document(doc_id):
+    """Test document deletion"""
+    print_header("6. Testing Document Deletion")
+    
+    if not doc_id:
+        print_warning("Skipping - no valid document ID")
+        return False
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            print_info(f"Deleting document {doc_id}...")
+            async with session.delete(f"{BASE_URL}{API_PREFIX}/{doc_id}") as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    print_success(f"Document deleted successfully!")
+                    print(f"  Message: {data.get('message', 'N/A')}")
+                    return True
+                else:
+                    error_text = await resp.text()
+                    print_error(f"Delete failed (Status {resp.status}): {error_text}")
+                    return False
+    except Exception as e:
+        print_error(f"Delete error: {e}")
+        return False
+
+async def test_invalid_endpoints():
+    """Test error handling"""
+    print_header("7. Testing Error Handling")
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            # Test invalid document ID
+            print_info("Testing invalid document ID...")
+            async with session.get(f"{BASE_URL}{API_PREFIX}/invalid_id_12345/summary") as resp:
+                if resp.status == 404 or resp.status == 400:
+                    print_success("✓ Proper error handling for invalid ID")
+                else:
+                    print_warning(f"Unexpected status {resp.status} for invalid ID")
+            
+            # Test empty search
+            print_info("Testing empty search query...")
+            async with session.get(f"{BASE_URL}{API_PREFIX}/search", params={"q": ""}) as resp:
+                if resp.status == 200 or resp.status == 400:
+                    print_success("✓ Proper handling of empty search")
+                else:
+                    print_warning(f"Unexpected status {resp.status} for empty search")
+            
+            return True
+    except Exception as e:
+        print_error(f"Error handling test failed: {e}")
+        return False
+
+async def test_swagger_ui():
+    """Test Swagger UI availability"""
+    print_header("8. Testing Swagger UI")
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            print_info("Checking Swagger UI at /docs...")
+            async with session.get(f"{BASE_URL}/docs") as resp:
+                if resp.status == 200:
+                    print_success("Swagger UI is available!")
+                    print(f"  Visit: {Colors.BOLD}{BASE_URL}/docs{Colors.RESET}")
+                    return True
+                else:
+                    print_error(f"Swagger UI returned status {resp.status}")
+                    return False
+    except Exception as e:
+        print_error(f"Swagger UI check failed: {e}")
+        return False
+
+async def run_all_tests():
+    """Run all tests"""
+    print(f"\n{Colors.BOLD}{Colors.CYAN}")
+    print("╔════════════════════════════════════════════════════════════╗")
+    print("║         DOC-SAGE BACKEND COMPREHENSIVE TEST SUITE          ║")
+    print("╚════════════════════════════════════════════════════════════╝")
+    print(f"{Colors.RESET}")
+    
+    results = {}
+    
+    # Test 1: Health check
+    results['health'] = await test_health_check()
+    if not results['health']:
+        print_error("\nBackend is not running. Cannot continue tests.")
+        return results
+    
+    # Test 2: Upload
+    doc_id = await test_upload_document()
+    results['upload'] = doc_id is not None
+    
+    # Test 3: Status/Summary
+    if doc_id:
+        results['status'] = await test_get_document_status(doc_id)
+    
+    # Test 4: Search
+    results['search'] = await test_search_documents()
+    
+    # Test 5: Get All
+    results['get_all'] = await test_get_all_documents()
+    
+    # Test 6: Delete
+    if doc_id:
+        results['delete'] = await test_delete_document(doc_id)
+    
+    # Test 7: Error handling
+    results['error_handling'] = await test_invalid_endpoints()
+    
+    # Test 8: Swagger UI
+    results['swagger'] = await test_swagger_ui()
+    
+    # Print summary
+    print_header("TEST SUMMARY")
+    passed = sum(1 for v in results.values() if v)
+    total = len(results)
+    
+    for test_name, passed_test in results.items():
+        status = f"{Colors.GREEN}✅ PASS{Colors.RESET}" if passed_test else f"{Colors.RED}❌ FAIL{Colors.RESET}"
+        print(f"  {test_name.upper():20} {status}")
+    
+    print(f"\n{Colors.BOLD}Total: {passed}/{total} tests passed{Colors.RESET}\n")
+    
+    return results
+
+if __name__ == "__main__":
+    asyncio.run(run_all_tests())

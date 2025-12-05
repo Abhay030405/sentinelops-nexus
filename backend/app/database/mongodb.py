@@ -1,6 +1,6 @@
 """
 MongoDB Database Connection Manager
-Handles async connection to MongoDB using Motor
+Handles async connection to LOCAL MongoDB using Motor
 """
 
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -19,8 +19,9 @@ db = Database()
 
 
 async def connect_to_mongo():
-    """Establish connection to MongoDB"""
+    """Establish connection to local MongoDB"""
     try:
+        # Simple connection to local MongoDB (no SSL)
         db.client = AsyncIOMotorClient(settings.MONGODB_URL)
         db.db = db.client[settings.MONGODB_DB_NAME]
         
@@ -34,6 +35,7 @@ async def connect_to_mongo():
         
     except Exception as e:
         logger.error(f"❌ Failed to connect to MongoDB: {e}")
+        logger.error("💡 Make sure MongoDB service is running: net start MongoDB")
         raise
 
 
@@ -54,7 +56,7 @@ async def create_indexes():
         # Identity logs collection indexes
         await db.db.identity_logs.create_index("username")
         await db.db.identity_logs.create_index("timestamp")
-        await db.db.identity_logs.create_index([("timestamp", -1)])  # Descending for recent logs
+        await db.db.identity_logs.create_index([("timestamp", -1)])
         
         logger.info("✅ Database indexes created successfully")
     except Exception as e:

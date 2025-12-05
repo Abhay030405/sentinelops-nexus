@@ -158,7 +158,7 @@ const PowerRangersLogin = () => {
         <div className="max-w-md w-full">
           {/* Power Rangers Logo Header */}
           <div className="text-center mb-8">
-            <div className="inline-block p-4 rounded-full bg-gradient-to-r from-red-500 via-blue-500 to-yellow-500 mb-4">
+            <div className="inline-block p-4 rounded-full bg-linear-to-r from-red-500 via-blue-500 to-yellow-500 mb-4">
               <Shield size={64} className="text-white" />
             </div>
             <h1 className="text-4xl font-bold text-white mb-2">SENTINEL OPS</h1>
@@ -208,7 +208,7 @@ const PowerRangersLogin = () => {
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full py-3 bg-gradient-to-r from-red-600 to-blue-600 text-white font-bold rounded-lg hover:from-red-700 hover:to-blue-700 transform hover:scale-105 transition-all duration-200 disabled:opacity-50"
+                className="w-full py-3 bg-linear-to-r from-red-600 to-blue-600 text-white font-bold rounded-lg hover:from-red-700 hover:to-blue-700 transform hover:scale-105 transition-all duration-200 disabled:opacity-50"
               >
                 {loading ? '⚡ MORPHING...' : '🔥 IT\'S MORPHIN TIME! 🔥'}
               </button>
@@ -226,12 +226,12 @@ const PowerRangersLogin = () => {
   }
 
   return (
-    <div className="min-h-screen p-6" style={{
+    <div className="min-h-screen p-600" style={{
       background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)'
     }}>
       {/* Header */}
       <div className="max-w-7xl mx-auto mb-8">
-        <div className="bg-gradient-to-r from-red-600 via-blue-600 to-yellow-600 rounded-lg p-6 shadow-2xl">
+        <div className="bg-linear-to-r from-red-600 via-blue-600 to-yellow-600 rounded-lg p-6 shadow-2xl">
           <div className="flex justify-between items-center">
             <div className="flex items-center gap-4">
               <Shield size={48} className="text-white" />
@@ -397,7 +397,7 @@ const PowerRangersLogin = () => {
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full py-4 bg-gradient-to-r from-red-600 to-blue-600 text-white font-bold text-lg rounded-lg hover:from-red-700 hover:to-blue-700 transform hover:scale-105 transition-all duration-200 disabled:opacity-50"
+                className="w-full py-4 bg-linear-to-r from-red-600 to-blue-600 text-white font-bold text-lg rounded-lg hover:from-red-700 hover:to-blue-700 transform hover:scale-105 transition-all duration-200 disabled:opacity-50"
               >
                 {loading ? '⚡ RECRUITING...' : '✨ ACTIVATE RANGER PROTOCOL ✨'}
               </button>
