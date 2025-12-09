@@ -35,11 +35,31 @@ class PyObjectId(ObjectId):
         return {"type": "string"}
 
 
+class PageSummary(BaseModel):
+    """Individual page summary"""
+    page_number: int = Field(..., description="Page number")
+    text_content: str = Field(..., description="Text content of the page")
+    summary: Optional[str] = Field(None, description="AI summary of the page")
+    key_points: List[str] = Field(default_factory=list, description="Key points extracted")
+
+
 class DocumentSummary(BaseModel):
     """Document summary information"""
     short_summary: Optional[str] = Field(None, description="Brief summary")
     long_summary: Optional[str] = Field(None, description="Detailed summary")
     keywords: List[str] = Field(default_factory=list, description="Extracted keywords")
+    tag_suggestions: List[str] = Field(default_factory=list, description="AI-suggested tags")
+    page_summaries: List[PageSummary] = Field(default_factory=list, description="Page-level summaries")
+
+
+class DocumentInsights(BaseModel):
+    """AI-powered document insights"""
+    total_pages: int = Field(0, description="Total number of pages")
+    word_count: int = Field(0, description="Total word count")
+    estimated_read_time: int = Field(0, description="Estimated read time in minutes")
+    document_type: Optional[str] = Field(None, description="Detected document type")
+    key_entities: List[str] = Field(default_factory=list, description="Key entities detected")
+    important_sections: List[str] = Field(default_factory=list, description="Important sections")
 
 
 class DocumentUploadResponse(BaseModel):
@@ -49,6 +69,7 @@ class DocumentUploadResponse(BaseModel):
     status: str = Field(default="processing")
     uploaded_at: datetime = Field(default_factory=datetime.utcnow)
     uploaded_by: str = Field(default="Current Ranger")
+    mission_id: Optional[str] = Field(None, description="Associated mission ID")
     
     class Config:
         json_schema_extra = {
@@ -71,8 +92,11 @@ class DocumentDetail(BaseModel):
     uploaded_at: datetime = Field(..., description="Upload timestamp")
     extracted_text: Optional[str] = Field(None, description="Extracted text")
     summary: Optional[DocumentSummary] = Field(None, description="AI summary")
+    insights: Optional[DocumentInsights] = Field(None, description="AI-powered insights")
     file_size: int = Field(..., description="File size in bytes")
     mime_type: str = Field(..., description="File MIME type")
+    mission_id: Optional[str] = Field(None, description="Associated mission ID")
+    allowed_users: List[str] = Field(default_factory=list, description="Users with access")
     
     class Config:
         json_schema_extra = {
@@ -117,17 +141,46 @@ class ErrorResponse(BaseModel):
     error: str
     detail: Optional[str] = None
     status_code: int
-    upload_date: datetime
-    file_type: str
-    file_size: int
-    short_summary: Optional[str] = None
-    long_summary: Optional[str] = None
-    keywords: List[str] = []
-    
-class DocumentSummaryResponse(BaseModel):
-    id: str
-    name: str
-    status: str
-    summary: Optional[str] = None
-    keywords: List[str] = []
-    extracted_text: Optional[str] = None
+
+
+class ChatMessage(BaseModel):
+    """Chat message in document chat"""
+    role: str = Field(..., description="Message role: 'user' or 'assistant'")
+    content: str = Field(..., description="Message content")
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ChatHistory(BaseModel):
+    """Chat history for a document"""
+    document_id: str = Field(..., description="Document ID")
+    mission_id: Optional[str] = Field(None, description="Mission ID")
+    user_id: str = Field(..., description="User ID")
+    messages: List[ChatMessage] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ChatRequest(BaseModel):
+    """Chat request from user"""
+    document_id: str = Field(..., description="Document ID to chat about")
+    question: str = Field(..., description="User's question")
+    include_history: bool = Field(default=True, description="Include chat history")
+
+
+class ChatResponse(BaseModel):
+    """Chat response"""
+    answer: str = Field(..., description="AI-generated answer")
+    sources: List[str] = Field(default_factory=list, description="Source references")
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+
+class DocumentAccessRequest(BaseModel):
+    """Request to access a document"""
+    document_id: str = Field(..., description="Document ID")
+    user_email: str = Field(..., description="User email requesting access")
+
+
+class DocumentAccessResponse(BaseModel):
+    """Response for document access"""
+    has_access: bool = Field(..., description="Whether user has access")
+    reason: Optional[str] = Field(None, description="Reason for access/denial")

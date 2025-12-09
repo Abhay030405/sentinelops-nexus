@@ -8,9 +8,13 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from .models import (
     KBPageCreate, KBPageUpdate, KBPageResponse,
-    SearchQuery, SearchResult, QueryRequest, QueryResponse
+    SearchQuery, SearchResult, QueryRequest, QueryResponse,
+    KBDocumentUpload, ChatQueryRequest, ChatQueryResponse, DocumentCategory
 )
-from .services import KBPageService, KBSearchService, KBRAGService
+from .services import (
+    KBPageService, KBSearchService, KBRAGService,
+    KBChatService, KBDocumentService
+)
 from app.utils.dependencies import get_db
 
 router = APIRouter(prefix="/kb", tags=["knowledge-crystal"])
@@ -25,7 +29,7 @@ async def create_kb_page(
     Create a new knowledge page and generate embeddings
     
     STEP 1: Creates KB page in MongoDB
-    STEP 2: Chunks content and generates embeddings with Gemini
+    STEP 2: Chunks content and generates embeddings with Ollama
     STEP 3: Stores chunks in vector DB (ChromaDB)
     """
     service = KBPageService(db)
@@ -59,22 +63,64 @@ async def get_kb_page(
 
 @router.get("/pages", response_model=dict)
 async def list_kb_pages(
+    category: Optional[str] = Query(None, description="Filter by category: agent or technician"),
     visibility: Optional[str] = Query(None, description="Filter by visibility (public/private)"),
+    country: Optional[str] = Query(None, description="Filter by country (for agent documents)"),
+    mission_id: Optional[str] = Query(None, description="Filter by mission ID"),
     tags: Optional[List[str]] = Query(None, description="Filter by tags"),
     limit: int = Query(10, ge=1, le=50),
     skip: int = Query(0, ge=0),
     db: AsyncIOMotorDatabase = Depends(get_db)
 ):
-    """List knowledge pages with optional filters"""
-    service = KBPageService(db)
-    result = await service.list_pages(
-        visibility=visibility,
-        tags=tags,
-        limit=limit,
-        skip=skip
-    )
+    """
+    List knowledge pages with optional filters
     
-    return result
+    Supports filtering by:
+    - Category (agent/technician) for role-based access
+    - Country for agent mission documents
+    - Mission ID for specific missions
+    - Tags for categorization
+    - Visibility (public/private)
+    """
+    service = KBPageService(db)
+    
+    # Build query filters
+    query = {}
+    if category:
+        query["category"] = category
+    if visibility:
+        query["visibility"] = visibility
+    if country:
+        query["country"] = country
+    if mission_id:
+        query["mission_id"] = mission_id
+    if tags:
+        query["tags"] = {"$in": tags}
+    
+    pages = await service.collection.find(query) \
+        .skip(skip) \
+        .limit(limit) \
+        .to_list(length=limit)
+    
+    total = await service.collection.count_documents(query)
+    
+    # Convert ObjectId to string
+    for page in pages:
+        page["_id"] = str(page["_id"])
+    
+    return {
+        "pages": pages,
+        "total": total,
+        "limit": limit,
+        "skip": skip,
+        "filters": {
+            "category": category,
+            "country": country,
+            "mission_id": mission_id,
+            "visibility": visibility,
+            "tags": tags
+        }
+    }
 
 
 @router.put("/page/{page_id}", response_model=dict)
@@ -115,19 +161,41 @@ async def delete_kb_page(
 async def semantic_search(
     q: str = Query(..., min_length=1, description="Search query"),
     limit: int = Query(5, ge=1, le=20),
+    category: Optional[str] = Query(None, description="Filter by category: agent or technician"),
+    country: Optional[str] = Query(None, description="Filter by country (for agent documents)"),
     tags: Optional[List[str]] = Query(None),
     visibility: Optional[str] = Query(None),
     db: AsyncIOMotorDatabase = Depends(get_db)
 ):
     """
-    Perform semantic search on knowledge pages
+    Perform semantic search on knowledge pages with role-based filtering
     
-    This is the smart search endpoint that uses vector similarity
-    instead of keyword matching.
+    This endpoint searches for documents based on:
+    - Natural language query (semantic search)
+    - Category (agent or technician) for role-based access
+    - Country filter for agent mission documents
+    - Tags for additional filtering
+    
+    Returns:
+    - Document ID
+    - Mission ID (if applicable)
+    - Country (if applicable)
+    - Long summary of the document
+    - Matched points from the query
     """
+    # Parse category if provided
+    doc_category = None
+    if category:
+        if category.lower() == "agent":
+            doc_category = DocumentCategory.AGENT
+        elif category.lower() == "technician":
+            doc_category = DocumentCategory.TECHNICIAN
+    
     search_query = SearchQuery(
         query=q,
         limit=limit,
+        category=doc_category,
+        country=country,
         tags=tags,
         visibility=visibility
     )
@@ -137,8 +205,43 @@ async def semantic_search(
     
     return {
         "query": q,
+        "category": category,
+        "country": country,
         "results_count": len(results),
         "results": results
+    }
+
+
+@router.post("/chat", response_model=dict)
+async def kb_chat(
+    chat_req: ChatQueryRequest,
+    db: AsyncIOMotorDatabase = Depends(get_db)
+):
+    """
+    NLP-based chat interface for Knowledge Crystal
+    
+    This is the main endpoint for agents and technicians to query the Knowledge Crystal.
+    
+    For Agents:
+    - Queries return mission-related documents
+    - Can search for previous missions in specific countries
+    - Returns document summaries and matched points
+    
+    For Technicians:
+    - Queries return technical documentation
+    - Can search for equipment documentation (CCTV, door locks, sensors, etc.)
+    - Returns setup procedures, working principles, and troubleshooting guides
+    
+    Role-based access control ensures:
+    - Agents cannot access technician documents
+    - Technicians cannot access agent mission documents
+    """
+    service = KBChatService(db)
+    response = await service.chat_query(chat_req)
+    
+    return {
+        "message": "Chat query processed successfully",
+        "data": response
     }
 
 
@@ -148,13 +251,15 @@ async def kb_query(
     db: AsyncIOMotorDatabase = Depends(get_db)
 ):
     """
-    Ask a question and get an AI-generated answer using RAG
+    Ask a question and get an AI-generated answer using RAG (Legacy endpoint)
     
     This endpoint:
     1. Converts question to embedding
     2. Retrieves relevant chunks from vector DB
-    3. Uses Gemini LLM to synthesize answer from chunks
+    3. Uses Ollama LLM to synthesize answer from chunks
     4. Returns answer with source citations
+    
+    Note: For new implementations, use /chat endpoint instead
     """
     service = KBRAGService(db)
     response = await service.query(query_req)
@@ -165,12 +270,57 @@ async def kb_query(
     }
 
 
+@router.post("/upload-document", response_model=dict)
+async def upload_document(
+    doc_upload: KBDocumentUpload,
+    file_content: str,
+    uploaded_by: str = "admin",
+    db: AsyncIOMotorDatabase = Depends(get_db)
+):
+    """
+    Upload a document to Knowledge Crystal (Admin only)
+    
+    This endpoint allows administrators to add documents to the Knowledge Crystal:
+    
+    For Agent Documents:
+    - Mission-related documents from previous operations
+    - Include mission_id and country for better organization
+    - Agents can query these to learn from previous missions
+    
+    For Technician Documents:
+    - Technical documentation for HQ equipment
+    - Setup guides, working principles, troubleshooting
+    - Examples: CCTV setup, door lock configuration, fingerprint sensors
+    
+    The document will be:
+    1. Processed and indexed
+    2. Chunked for vector search
+    3. Made searchable via the chat interface
+    """
+    service = KBDocumentService(db)
+    result = await service.process_uploaded_document(
+        file_content=file_content,
+        doc_upload=doc_upload,
+        uploaded_by=uploaded_by
+    )
+    
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error"))
+    
+    return {
+        "message": "Document uploaded and indexed successfully",
+        "data": result
+    }
+
+
 @router.get("/stats", response_model=dict)
 async def get_kb_stats(db: AsyncIOMotorDatabase = Depends(get_db)):
     """Get statistics about the knowledge base"""
     service = KBPageService(db)
     
     total_pages = await service.collection.count_documents({})
+    agent_docs = await service.collection.count_documents({"category": "agent"})
+    technician_docs = await service.collection.count_documents({"category": "technician"})
     public_pages = await service.collection.count_documents({"visibility": "public"})
     private_pages = await service.collection.count_documents({"visibility": "private"})
     
@@ -181,11 +331,21 @@ async def get_kb_stats(db: AsyncIOMotorDatabase = Depends(get_db)):
         {"$sort": {"count": -1}}
     ]).to_list(length=20)
     
+    # Get countries (for agent documents)
+    countries_result = await service.collection.aggregate([
+        {"$match": {"category": "agent", "country": {"$ne": None}}},
+        {"$group": {"_id": "$country", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}}
+    ]).to_list(length=20)
+    
     return {
         "total_pages": total_pages,
+        "agent_documents": agent_docs,
+        "technician_documents": technician_docs,
         "public_pages": public_pages,
         "private_pages": private_pages,
-        "top_tags": tags_result
+        "top_tags": tags_result,
+        "countries": countries_result
     }
 
 
@@ -195,10 +355,17 @@ async def kb_health():
     return {
         "status": "healthy",
         "service": "knowledge-crystal",
+        "version": "2.0",
         "features": [
-            "kb_page_creation",
+            "document_upload",
+            "role_based_access_control",
+            "nlp_chat_interface",
+            "mission_document_library",
+            "technical_documentation_center",
             "vector_embeddings",
             "semantic_search",
             "rag_qa_engine"
-        ]
+        ],
+        "supported_roles": ["agent", "technician"],
+        "document_categories": ["agent", "technician"]
     }

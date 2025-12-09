@@ -1,5 +1,0 @@
-This is a test document for Doc-Sage backend testing.
-It contains information about Power Rangers Zord maintenance.
-The Zord system requires regular maintenance and coolant refills.
-Emergency protocols must be followed during system failures.
-All technicians must complete safety certification before operation.

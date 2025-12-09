@@ -50,17 +50,18 @@ async def create_indexes():
     """Create database indexes for better performance"""
     try:
         # Users collection indexes
-        await db.db.users.create_index("username", unique=True)
-        await db.db.users.create_index("qr_token", unique=True)
+        await db.db.users.create_index("email", unique=True)
+        # qr_token is sparse (only index non-null values) to avoid duplicates on NULL
+        await db.db.users.create_index("qr_token", unique=True, sparse=True)
         
         # Identity logs collection indexes
-        await db.db.identity_logs.create_index("username")
+        await db.db.identity_logs.create_index("email")
         await db.db.identity_logs.create_index("timestamp")
         await db.db.identity_logs.create_index([("timestamp", -1)])
         
-        logger.info("✅ Database indexes created successfully")
+        logger.info("[OK] Database indexes created successfully")
     except Exception as e:
-        logger.warning(f"⚠️ Index creation warning: {e}")
+        logger.warning(f"[WARN] Index creation warning: {e}")
 
 
 def get_database():

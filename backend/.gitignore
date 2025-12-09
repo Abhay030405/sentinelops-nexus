@@ -1,2 +1,78 @@
+# Environment Variables & Secrets
 *.env
-venv
+.env
+.env.local
+.env.*.local
+.env.production
+
+# Python Virtual Environment
+venv/
+ENV/
+env/
+.venv/
+*.pyc
+__pycache__/
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Database & Data
+*.db
+*.sqlite
+*.sqlite3
+/db/
+mongodb.log
+*.wt
+WiredTiger.lock
+diagnostic.data/
+journal/
+
+# Uploads & Temporary Files
+/uploads/
+/temp/
+/tmp/
+*.tmp
+.cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.sublime-project
+*.sublime-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+*.log
+ehthumbs.db
+
+# API Keys & Credentials
+secrets/
+*.pem
+*.key
+*.crt
+*.pfx
+*.p12
+credentials/
+private_key.txt
+token.txt
+
+# Configuration with secrets
+config.local.py
+settings.local.py
+local_settings.py
+
+# Test & Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Misc
+.turbo/
+.vercel/
+.pycache

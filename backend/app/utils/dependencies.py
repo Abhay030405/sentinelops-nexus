@@ -3,12 +3,15 @@ FastAPI Dependencies
 Authentication middleware and RBAC
 """
 
+import logging
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import Optional
 from app.utils.auth import decode_access_token
 from app.database.mongodb import get_database
 from app.identity_vault.models import UserRole
+
+logger = logging.getLogger(__name__)
 
 security = HTTPBearer()
 
@@ -28,18 +31,27 @@ async def get_current_user(
     Raises:
         HTTPException: If authentication fails
     """
-    token = credentials.credentials
-    payload = decode_access_token(token)
-    username = payload.get("sub")
-    
-    if username is None:
+    try:
+        token = credentials.credentials
+        payload = decode_access_token(token)
+        email = payload.get("sub")
+        
+        if email is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid authentication credentials",
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Token decode error: {e}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authentication credentials",
         )
     
     db = get_database()
-    user = await db.users.find_one({"username": username})
+    user = await db["users"].find_one({"email": email})
     
     if user is None:
         raise HTTPException(
@@ -47,12 +59,13 @@ async def get_current_user(
             detail="User not found",
         )
     
-    if not user.get("is_active", True):
+    if user.get("status") != "active":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Inactive user account",
+            detail="User account is inactive or suspended",
         )
     
+    logger.debug(f"Current user authenticated: {email}")
     return user
 
 
@@ -68,7 +81,7 @@ async def get_current_active_user(
     Returns:
         Active user document
     """
-    if not current_user.get("is_active", True):
+    if current_user.get("status") != "active":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User account is inactive"
@@ -76,12 +89,33 @@ async def get_current_active_user(
     return current_user
 
 
-async def require_role(required_role: UserRole):
+async def get_current_admin(
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Require admin role for endpoint access
+    
+    Args:
+        current_user: Current authenticated user
+        
+    Returns:
+        User if admin, raises exception otherwise
+    """
+    if current_user.get("role") != UserRole.ADMIN.value:
+        logger.warning(f"Unauthorized admin access attempt by: {current_user.get('email')}")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required"
+        )
+    return current_user
+
+
+async def require_role(required_role: str):
     """
     Factory function to create role-checking dependency
     
     Args:
-        required_role: Minimum required role
+        required_role: Required role string
         
     Returns:
         Dependency function
@@ -89,17 +123,18 @@ async def require_role(required_role: UserRole):
     async def role_checker(current_user: dict = Depends(get_current_active_user)):
         user_role = current_user.get("role")
         
-        # Role hierarchy: admin > operator > viewer
+        # Role hierarchy: admin > technician > agent
         role_hierarchy = {
-            UserRole.ADMIN: 3,
-            UserRole.OPERATOR: 2,
-            UserRole.VIEWER: 1
+            UserRole.ADMIN.value: 3,
+            UserRole.TECHNICIAN.value: 2,
+            UserRole.AGENT.value: 1
         }
         
         user_level = role_hierarchy.get(user_role, 0)
         required_level = role_hierarchy.get(required_role, 0)
         
         if user_level < required_level:
+            logger.warning(f"Insufficient permissions for user: {current_user.get('email')}")
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Insufficient permissions. Required role: {required_role}"
@@ -110,19 +145,5 @@ async def require_role(required_role: UserRole):
     return role_checker
 
 
-async def require_admin(current_user: dict = Depends(get_current_active_user)):
-    """
-    Require admin role for endpoint access
-    
-    Args:
-        current_user: Current authenticated user
-        
-    Returns:
-        User if admin, raises exception otherwise
-    """
-    if current_user.get("role") != UserRole.ADMIN:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin access required. You must be a Red Ranger!"
-        )
-    return current_user
+# Alias for compatibility with other modules
+get_db = get_database

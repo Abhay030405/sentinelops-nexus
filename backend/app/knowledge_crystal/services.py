@@ -8,7 +8,8 @@ from bson import ObjectId
 from motor.motor_asyncio import AsyncIOMotorDatabase, AsyncIOMotorCollection
 from .models import (
     KBPageCreate, KBPageUpdate, KBPageResponse,
-    SearchQuery, SearchResult, QueryRequest, QueryResponse
+    SearchQuery, SearchResult, QueryRequest, QueryResponse,
+    KBDocumentUpload, ChatQueryRequest, ChatQueryResponse, DocumentCategory
 )
 from .embedding_service import get_embedding_service
 from .vector_store import get_vector_store
@@ -48,6 +49,9 @@ class KBPageService:
             "_id": ObjectId(),
             "title": page_data.title,
             "content": page_data.content,
+            "category": page_data.category,
+            "mission_id": page_data.mission_id,
+            "country": page_data.country,
             "tags": page_data.tags,
             "visibility": page_data.visibility,
             "author": page_data.author,
@@ -63,11 +67,17 @@ class KBPageService:
         page_id = str(result.inserted_id)
         
         # Add chunks to vector store
+        # Note: ChromaDB only accepts scalar values (str, int, float, bool) in metadata
+        # Convert lists to comma-separated strings
         metadata = [
             {
+                "page_id": page_id,
+                "category": page_data.category,
+                "mission_id": page_data.mission_id or "",
+                "country": page_data.country or "",
                 "visibility": page_data.visibility,
                 "author": page_data.author,
-                "tags": page_data.tags
+                "tags": ",".join(page_data.tags) if page_data.tags else ""
             }
             for _ in chunks
         ]
@@ -148,11 +158,16 @@ class KBPageService:
             
             # Add new chunks
             title = update_data.title or existing_page.get("title")
+            tags = update_data.tags or existing_page.get("tags", [])
             metadata = [
                 {
+                    "page_id": page_id,
+                    "category": existing_page.get("category", ""),
+                    "mission_id": existing_page.get("mission_id", "") or "",
+                    "country": existing_page.get("country", "") or "",
                     "visibility": update_data.visibility or existing_page.get("visibility"),
                     "author": existing_page.get("author"),
-                    "tags": update_data.tags or existing_page.get("tags")
+                    "tags": ",".join(tags) if isinstance(tags, list) else tags
                 }
                 for _ in chunks
             ]
@@ -257,14 +272,14 @@ class KBSearchService:
         limit: int = 5
     ) -> List[SearchResult]:
         """
-        Perform semantic search on knowledge pages
+        Perform semantic search on knowledge pages with role-based filtering
         
         Args:
-            query: Search query
+            query: Search query with filters
             limit: Number of results to return
         
         Returns:
-            List of search results
+            List of search results with document info and matched points
         """
         embedding_service = get_embedding_service()
         vector_store = get_vector_store()
@@ -276,31 +291,165 @@ class KBSearchService:
             print(f"❌ Failed to embed query: {e}")
             return []
         
-        # Search vector store
-        chunks = vector_store.search(query_embedding, limit=limit)
+        # Build vector store filters for category
+        vector_filters = {}
+        if query.category:
+            vector_filters["category"] = query.category
+        
+        # Search vector store with category filter applied at vector level
+        chunks = vector_store.search(
+            query_embedding, 
+            limit=limit * 3,  # Get more chunks for additional filtering
+            filters=vector_filters if vector_filters else None
+        )
         
         results = []
+        seen_pages = set()
+        
         for chunk in chunks:
             metadata = chunk.get("metadata", {})
             page_id = metadata.get("page_id")
+            
+            # Skip if we've already processed this page
+            if page_id in seen_pages:
+                continue
+            
+            # Filter by country if specified (additional filter beyond vector search)
+            if query.country and metadata.get("country") != query.country:
+                continue
             
             # Get page details
             page = await self.page_collection.find_one({"_id": ObjectId(page_id)})
             if not page:
                 continue
             
+            # Apply visibility filter
+            if query.visibility and page.get("visibility") != query.visibility:
+                continue
+            
+            # Apply tags filter
+            if query.tags:
+                page_tags = set(page.get("tags", []))
+                query_tags = set(query.tags)
+                if not page_tags.intersection(query_tags):
+                    continue
+            
+            seen_pages.add(page_id)
+            
+            # Generate long summary and extract matched points
+            long_summary = await self._generate_summary(page.get("content", ""))
+            matched_points = await self._extract_matched_points(
+                page.get("content", ""),
+                query.query,
+                chunk.get("content", "")
+            )
+            
             result = SearchResult(
-                page_id=str(page["_id"]),
+                document_id=str(page["_id"]),
                 title=page.get("title", ""),
-                content=page.get("content", "")[:1000],  # Truncate long content
+                mission_id=page.get("mission_id"),
+                country=page.get("country"),
+                long_summary=long_summary,
+                matched_points=matched_points,
+                category=page.get("category", ""),
                 tags=page.get("tags", []),
-                chunk_snippet=chunk.get("content", "")[:500],
                 similarity_score=chunk.get("similarity_score", 0),
                 author=page.get("author", "unknown")
             )
             results.append(result)
+            
+            if len(results) >= limit:
+                break
         
         return results
+    
+    async def _generate_summary(self, content: str) -> str:
+        """Generate a detailed summary of the document using Ollama"""
+        import requests
+        
+        try:
+            prompt = f"""Generate a comprehensive summary (150-200 words) of the following document:
+
+{content[:4000]}
+
+Provide a detailed summary that captures the main topics, key information, and important details."""
+            
+            response = requests.post(
+                f"{settings.OLLAMA_BASE_URL}/api/generate",
+                json={
+                    "model": settings.OLLAMA_MODEL,
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": {
+                        "num_predict": 250,
+                        "temperature": 0.7
+                    }
+                },
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                return response.json()["response"].strip()
+            else:
+                print(f"❌ Ollama API error: {response.status_code}")
+                return content[:500]
+        except Exception as e:
+            print(f"❌ Error generating summary: {e}")
+            return content[:500]
+    
+    async def _extract_matched_points(self, content: str, query: str, relevant_chunk: str) -> List[str]:
+        """Extract specific points from the document that match the query using Ollama"""
+        import requests
+        import json
+        import re
+        
+        try:
+            prompt = f"""Based on the user query: "{query}"
+
+Extract 3-5 specific points from this document that are most relevant to the query:
+
+Relevant Section:
+{relevant_chunk}
+
+Full Context:
+{content[:3000]}
+
+Return the points as a JSON array of strings. Each point should be a concise statement (1-2 sentences)."""
+            
+            response = requests.post(
+                f"{settings.OLLAMA_BASE_URL}/api/generate",
+                json={
+                    "model": settings.OLLAMA_MODEL,
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": {
+                        "num_predict": 300,
+                        "temperature": 0.7
+                    }
+                },
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                response_text = response.json()["response"].strip()
+                
+                # Try to parse JSON response
+                json_match = re.search(r'\[.*\]', response_text, re.DOTALL)
+                if json_match:
+                    points = json.loads(json_match.group())
+                    return points[:5]
+                else:
+                    # Fallback: split by lines and extract bullet points
+                    lines = [line.strip().lstrip('-•*').strip() 
+                            for line in response_text.split('\n') 
+                            if line.strip() and not line.strip().startswith('[')]
+                    return [l for l in lines if len(l) > 10][:5]
+            else:
+                print(f"❌ Ollama API error: {response.status_code}")
+                return [relevant_chunk[:200]]
+        except Exception as e:
+            print(f"❌ Error extracting matched points: {e}")
+            return [relevant_chunk[:200]]
 
 
 class KBRAGService:
@@ -321,8 +470,6 @@ class KBRAGService:
         Returns:
             Query response with answer and sources
         """
-        from langchain_google_genai import ChatGoogleGenerativeAI
-        
         # Search for relevant chunks
         search_query = SearchQuery(
             query=query_req.question,
@@ -338,7 +485,7 @@ class KBRAGService:
                 answer="No relevant information found in the knowledge base.",
                 sources=[],
                 confidence=0.0,
-                model_used=settings.GEMINI_MODEL
+                model_used=settings.OLLAMA_MODEL
             )
         
         # Prepare context from retrieved chunks
@@ -359,14 +506,27 @@ Question: {query_req.question}
 Please provide a clear, concise answer citing the relevant sources."""
         
         try:
-            # Generate answer using Gemini
-            llm = ChatGoogleGenerativeAI(
-                model=settings.GEMINI_MODEL,
-                google_api_key=settings.GEMINI_API_KEY
+            # Generate answer using Ollama
+            import requests
+            
+            response = requests.post(
+                f"{settings.OLLAMA_BASE_URL}/api/generate",
+                json={
+                    "model": settings.OLLAMA_MODEL,
+                    "prompt": rag_prompt,
+                    "stream": False,
+                    "options": {
+                        "num_predict": 500,
+                        "temperature": 0.7
+                    }
+                },
+                timeout=60
             )
             
-            response = llm.invoke(rag_prompt)
-            answer = response.content if hasattr(response, 'content') else str(response)
+            if response.status_code == 200:
+                answer = response.json()["response"].strip()
+            else:
+                answer = f"Error: Ollama API returned status {response.status_code}"
             
             # Calculate confidence based on similarity scores
             avg_confidence = sum(s.similarity_score for s in sources) / len(sources) if sources else 0
@@ -375,7 +535,7 @@ Please provide a clear, concise answer citing the relevant sources."""
                 answer=answer,
                 sources=sources,
                 confidence=min(1.0, avg_confidence),
-                model_used=settings.GEMINI_MODEL
+                model_used=settings.OLLAMA_MODEL
             )
         
         except Exception as e:
@@ -384,8 +544,180 @@ Please provide a clear, concise answer citing the relevant sources."""
                 answer=f"Error generating answer: {str(e)}",
                 sources=sources,
                 confidence=0.0,
-                model_used=settings.GEMINI_MODEL
+                model_used=settings.OLLAMA_MODEL
             )
+
+
+class KBChatService:
+    """Service for NLP-based chat queries with role-based access control"""
+    
+    def __init__(self, db: AsyncIOMotorDatabase):
+        self.db = db
+        self.search_service = KBSearchService(db)
+    
+    async def chat_query(self, chat_req: ChatQueryRequest) -> ChatQueryResponse:
+        """
+        Process natural language queries and return relevant documents
+        
+        Args:
+            chat_req: Chat query request with NLP query and user role
+        
+        Returns:
+            Chat response with matched documents and AI-generated answer
+        """
+        # Determine category based on user role
+        category = None
+        if chat_req.user_role.lower() == "agent":
+            category = DocumentCategory.AGENT
+        elif chat_req.user_role.lower() == "technician":
+            category = DocumentCategory.TECHNICIAN
+        else:
+            return ChatQueryResponse(
+                answer="Invalid user role. Must be 'agent' or 'technician'.",
+                matched_documents=[],
+                confidence=0.0,
+                model_used=settings.OLLAMA_MODEL
+            )
+        
+        # Create search query with role-based filtering
+        search_query = SearchQuery(
+            query=chat_req.query,
+            limit=chat_req.limit,
+            category=category,
+            tags=chat_req.tags
+        )
+        
+        # Search for relevant documents
+        matched_documents = await self.search_service.search(search_query, limit=chat_req.limit)
+        
+        if not matched_documents:
+            return ChatQueryResponse(
+                answer=f"No relevant documents found in the Knowledge Crystal for {chat_req.user_role}s. Please try a different query or contact an administrator to add relevant documentation.",
+                matched_documents=[],
+                confidence=0.0,
+                model_used=settings.OLLAMA_MODEL
+            )
+        
+        # Prepare context from matched documents
+        context = "\n\n".join([
+            f"Document: {doc.title}\n"
+            f"Mission ID: {doc.mission_id or 'N/A'}\n"
+            f"Country: {doc.country or 'N/A'}\n"
+            f"Summary: {doc.long_summary}\n"
+            f"Relevant Points:\n" + "\n".join([f"- {point}" for point in doc.matched_points])
+            for doc in matched_documents
+        ])
+        
+        # Create RAG prompt for chat response
+        role_context = ""
+        if category == DocumentCategory.AGENT:
+            role_context = """You are assisting a field agent who needs information about previous missions and operational resources. 
+Focus on mission-related information, country-specific details, and operational guidance."""
+        else:
+            role_context = """You are assisting a technician who needs technical documentation about HQ equipment and systems.
+Focus on technical specifications, setup procedures, maintenance guidelines, and troubleshooting information."""
+        
+        rag_prompt = f"""{role_context}
+
+User Query: {chat_req.query}
+
+Available Information from Knowledge Crystal:
+{context}
+
+Please provide a comprehensive answer to the user's query based on the available documents. 
+If multiple documents are relevant, synthesize the information coherently.
+Always mention which documents you're referencing (by title or mission ID).
+
+If the query cannot be fully answered with the available information, explain what is available and what might be missing."""
+        
+        try:
+            # Generate answer using Ollama
+            import requests
+            
+            response = requests.post(
+                f"{settings.OLLAMA_BASE_URL}/api/generate",
+                json={
+                    "model": settings.OLLAMA_MODEL,
+                    "prompt": rag_prompt,
+                    "stream": False,
+                    "options": {
+                        "num_predict": 600,
+                        "temperature": 0.7
+                    }
+                },
+                timeout=60
+            )
+            
+            if response.status_code == 200:
+                answer = response.json()["response"].strip()
+            else:
+                answer = f"Error: Ollama API returned status {response.status_code}"
+            
+            # Calculate confidence based on similarity scores
+            avg_confidence = sum(doc.similarity_score for doc in matched_documents) / len(matched_documents)
+            
+            return ChatQueryResponse(
+                answer=answer,
+                matched_documents=matched_documents,
+                confidence=min(1.0, avg_confidence),
+                model_used=settings.OLLAMA_MODEL
+            )
+        
+        except Exception as e:
+            print(f"❌ Error generating chat response: {e}")
+            return ChatQueryResponse(
+                answer=f"Error generating response: {str(e)}",
+                matched_documents=matched_documents,
+                confidence=0.0,
+                model_used=settings.OLLAMA_MODEL
+            )
+
+
+class KBDocumentService:
+    """Service for handling document uploads to Knowledge Crystal"""
+    
+    def __init__(self, db: AsyncIOMotorDatabase):
+        self.db = db
+        self.page_service = KBPageService(db)
+    
+    async def process_uploaded_document(
+        self,
+        file_content: str,
+        doc_upload: KBDocumentUpload,
+        uploaded_by: str
+    ) -> Dict[str, Any]:
+        """
+        Process an uploaded document and add it to Knowledge Crystal
+        
+        Args:
+            file_content: Extracted text content from the uploaded file
+            doc_upload: Document upload metadata
+            uploaded_by: ID of the user who uploaded the document
+        
+        Returns:
+            Processing result
+        """
+        # Create KB page from uploaded document
+        page_data = KBPageCreate(
+            title=doc_upload.title,
+            content=file_content,
+            category=doc_upload.category,
+            mission_id=doc_upload.mission_id,
+            country=doc_upload.country,
+            tags=doc_upload.tags,
+            visibility="public",  # Can be adjusted based on requirements
+            author=uploaded_by,
+            metadata={
+                "description": doc_upload.description,
+                "upload_date": datetime.utcnow().isoformat(),
+                **doc_upload.metadata
+            }
+        )
+        
+        # Use the page service to create and index the document
+        result = await self.page_service.create_page(page_data)
+        
+        return result
 
 
 # Import settings at end to avoid circular imports

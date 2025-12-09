@@ -112,17 +112,26 @@ class VectorStoreManager:
         Args:
             query_embedding: Query embedding vector
             limit: Number of results to return
-            filters: Optional filters (e.g., {"page_id": "123"})
+            filters: Optional filters (e.g., {"category": "agent"})
         
         Returns:
             List of search results with documents and scores
         """
         try:
-            results = self.collection.query(
-                query_embeddings=[query_embedding],
-                n_results=limit,
-                where=filters
-            )
+            # Debug: print filters being applied
+            print(f"🔍 Vector Store Search - Applying filters: {filters}")
+            
+            # Query ChromaDB with filters
+            query_params = {
+                "query_embeddings": [query_embedding],
+                "n_results": limit
+            }
+            
+            # Only add where clause if filters are provided
+            if filters:
+                query_params["where"] = filters
+            
+            results = self.collection.query(**query_params)
             
             # Format results
             formatted_results = []
@@ -132,15 +141,21 @@ class VectorStoreManager:
                 metadatas = results["metadatas"][0] if results.get("metadatas") else []
                 ids = results["ids"][0] if results.get("ids") else []
                 
+                print(f"📊 Found {len(documents)} results from ChromaDB")
+                
                 for i, doc in enumerate(documents):
                     # Convert distance to similarity score (cosine distance to similarity)
                     similarity = 1 - (distances[i] if i < len(distances) else 0)
+                    
+                    # Debug: show category of each result
+                    metadata = metadatas[i] if i < len(metadatas) else {}
+                    print(f"   Result {i+1}: category='{metadata.get('category', 'NONE')}', similarity={similarity:.3f}")
                     
                     formatted_results.append({
                         "chunk_id": ids[i] if i < len(ids) else "",
                         "content": doc,
                         "similarity_score": max(0, min(1, similarity)),
-                        "metadata": metadatas[i] if i < len(metadatas) else {}
+                        "metadata": metadata
                     })
             
             return formatted_results

@@ -15,9 +15,12 @@ class Settings(BaseSettings):
     MONGODB_URL: str = "mongodb://localhost:27017"
     MONGODB_DB_NAME: str = "sentinel_ops_nexus"
     
-    # Gemini AI Settings
-    GEMINI_API_KEY: str = ""  # Set this in .env file
-    GEMINI_MODEL: str = "gemini-2.0-flash"
+    # AI Settings - Using Ollama
+    AI_PROVIDER: str = "ollama"
+    
+    # Ollama Settings
+    OLLAMA_BASE_URL: str = "http://localhost:11434"
+    OLLAMA_MODEL: str = "llama3.2:3b"  # or "llama3.2:1b", "llama3:8b"
     
     # File Storage Settings
     UPLOAD_DIR: str = "./uploads"
@@ -63,21 +66,21 @@ def setup_tesseract():
     if settings.TESSERACT_PATH:
         if os.path.exists(settings.TESSERACT_PATH):
             pytesseract.pytesseract.tesseract_cmd = settings.TESSERACT_PATH
-            print(f"✅ Tesseract configured at: {settings.TESSERACT_PATH}")
+            print(f"[OK] Tesseract configured at: {settings.TESSERACT_PATH}")
         else:
-            print(f"⚠️ Tesseract path not found: {settings.TESSERACT_PATH}")
+            print(f"[WARN] Tesseract path not found: {settings.TESSERACT_PATH}")
     # Windows - try common installation paths
     elif os.name == 'nt':
         for path in windows_paths:
             if os.path.exists(path):
                 pytesseract.pytesseract.tesseract_cmd = path
-                print(f"✅ Tesseract found at: {path}")
+                print(f"[OK] Tesseract found at: {path}")
                 return
-        print("⚠️ Tesseract not found in common Windows paths")
+        print("[WARN] Tesseract not found in common Windows paths")
         print("   Install from: https://github.com/UB-Mannheim/tesseract/wiki")
     else:
         # macOS/Linux - tesseract should be in PATH
-        print("✅ Tesseract OCR should be available in PATH (macOS/Linux)")
+        print("[OK] Tesseract OCR should be available in PATH (macOS/Linux)")
 
 # Call setup on import
 setup_tesseract()

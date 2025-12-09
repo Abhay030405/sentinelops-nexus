@@ -27,7 +27,9 @@ class DocumentService:
         file_path: str,
         file_size: int,
         mime_type: str,
-        uploaded_by: str = "Current Ranger"
+        uploaded_by: str = "Current Ranger",
+        mission_id: Optional[str] = None,
+        allowed_users: List[str] = None
     ) -> dict:
         """Create document record in database"""
         try:
@@ -42,11 +44,23 @@ class DocumentService:
                 "status": "processing",
                 "uploaded_by": uploaded_by,
                 "uploaded_at": datetime.utcnow(),
+                "mission_id": mission_id,
+                "allowed_users": allowed_users or [],
                 "extracted_text": None,
                 "summary": {
                     "short_summary": None,
                     "long_summary": None,
-                    "keywords": []
+                    "keywords": [],
+                    "tag_suggestions": [],
+                    "page_summaries": []
+                },
+                "insights": {
+                    "total_pages": 0,
+                    "word_count": 0,
+                    "estimated_read_time": 0,
+                    "document_type": None,
+                    "key_entities": [],
+                    "important_sections": []
                 },
                 "processed_at": None
             }
@@ -59,7 +73,8 @@ class DocumentService:
                 "name": filename,
                 "status": "processing",
                 "uploaded_at": document["uploaded_at"],
-                "uploaded_by": document["uploaded_by"]
+                "uploaded_by": document["uploaded_by"],
+                "mission_id": mission_id
             }
         
         except Exception as e:
@@ -82,12 +97,23 @@ class DocumentService:
             raise
     
     @classmethod
-    async def get_all_documents(cls) -> List[dict]:
-        """Get all documents"""
+    async def get_all_documents(cls, user_email: Optional[str] = None) -> List[dict]:
+        """Get all documents (filtered by access if user_email provided)"""
         try:
             db = get_database()
             collection = db[cls.COLLECTION_NAME]
-            docs = await collection.find().sort("uploaded_at", -1).to_list(None)
+            
+            query = {}
+            if user_email:
+                query = {
+                    "$or": [
+                        {"uploaded_by": user_email},
+                        {"allowed_users": user_email},
+                        {"allowed_users": {"$size": 0}}  # Documents with no restrictions
+                    ]
+                }
+            
+            docs = await collection.find(query).sort("uploaded_at", -1).to_list(None)
             
             # Convert ObjectIds to strings for Pydantic serialization
             for doc in docs:
@@ -98,6 +124,54 @@ class DocumentService:
         except Exception as e:
             logger.error(f"❌ Error getting documents: {e}")
             raise
+    
+    @classmethod
+    async def get_documents_by_mission(cls, mission_id: str, user_email: Optional[str] = None) -> List[dict]:
+        """Get all documents for a specific mission"""
+        try:
+            db = get_database()
+            collection = db[cls.COLLECTION_NAME]
+            
+            query = {"mission_id": mission_id}
+            if user_email:
+                query["$or"] = [
+                    {"uploaded_by": user_email},
+                    {"allowed_users": user_email}
+                ]
+            
+            docs = await collection.find(query).sort("uploaded_at", -1).to_list(None)
+            
+            for doc in docs:
+                doc["_id"] = str(doc["_id"])
+            
+            return docs
+        
+        except Exception as e:
+            logger.error(f"❌ Error getting mission documents: {e}")
+            raise
+    
+    @classmethod
+    async def check_document_access(cls, doc_id: str, user_email: str) -> bool:
+        """Check if user has access to document"""
+        try:
+            doc = await cls.get_document(doc_id)
+            if not doc:
+                return False
+            
+            # Admin/uploader always has access
+            if doc.get("uploaded_by") == user_email:
+                return True
+            
+            # Check allowed users list
+            allowed_users = doc.get("allowed_users", [])
+            if not allowed_users:  # Empty list means public
+                return True
+            
+            return user_email in allowed_users
+        
+        except Exception as e:
+            logger.error(f"❌ Error checking access: {e}")
+            return False
     
     @classmethod
     async def update_document_status(cls, doc_id: str, **fields) -> bool:
@@ -120,7 +194,7 @@ class DocumentService:
     
     @classmethod
     async def process_document_text(cls, doc_id: str) -> bool:
-        """Process document: extract text and generate AI summary"""
+        """Process document: extract text and generate AI summary with insights"""
         try:
             logger.info(f"🔄 Processing document: {doc_id}")
             
@@ -134,12 +208,19 @@ class DocumentService:
             
             logger.info("🤖 Processing with AI...")
             ai_processor = get_ai_processor()
+            
+            # Generate summary and tags
             ai_result = ai_processor.process_document(text)
+            
+            # Generate insights
+            logger.info("📊 Generating insights...")
+            insights = ai_processor.generate_document_insights(text)
             
             await cls.update_document_status(
                 doc_id,
                 extracted_text=text,
                 summary=ai_result,
+                insights=insights,
                 status="processed",
                 processed_at=datetime.utcnow()
             )
@@ -208,4 +289,134 @@ class DocumentService:
             raise
 
 
+class ChatService:
+    """Service for document chat functionality"""
+    
+    COLLECTION_NAME = "document_chats"
+    
+    @classmethod
+    async def get_or_create_chat_history(cls, document_id: str, user_id: str, mission_id: Optional[str] = None) -> dict:
+        """Get existing chat history or create new one"""
+        try:
+            db = get_database()
+            collection = db[cls.COLLECTION_NAME]
+            
+            chat = await collection.find_one({
+                "document_id": document_id,
+                "user_id": user_id
+            })
+            
+            if not chat:
+                chat = {
+                    "document_id": document_id,
+                    "mission_id": mission_id,
+                    "user_id": user_id,
+                    "messages": [],
+                    "created_at": datetime.utcnow(),
+                    "updated_at": datetime.utcnow()
+                }
+                result = await collection.insert_one(chat)
+                chat["_id"] = str(result.inserted_id)
+            else:
+                chat["_id"] = str(chat["_id"])
+            
+            return chat
+        
+        except Exception as e:
+            logger.error(f"❌ Error getting chat history: {e}")
+            raise
+    
+    @classmethod
+    async def add_message(cls, document_id: str, user_id: str, role: str, content: str) -> bool:
+        """Add a message to chat history"""
+        try:
+            db = get_database()
+            collection = db[cls.COLLECTION_NAME]
+            
+            message = {
+                "role": role,
+                "content": content,
+                "timestamp": datetime.utcnow()
+            }
+            
+            result = await collection.update_one(
+                {"document_id": document_id, "user_id": user_id},
+                {
+                    "$push": {"messages": message},
+                    "$set": {"updated_at": datetime.utcnow()}
+                }
+            )
+            
+            return result.modified_count > 0
+        
+        except Exception as e:
+            logger.error(f"❌ Error adding message: {e}")
+            raise
+    
+    @classmethod
+    async def answer_question(cls, document_id: str, user_id: str, question: str, include_history: bool = True) -> dict:
+        """Answer a question about the document using AI"""
+        try:
+            # Get document
+            doc = await DocumentService.get_document(document_id)
+            if not doc:
+                raise ValueError("Document not found")
+            
+            if doc.get("status") != "processed":
+                raise ValueError("Document is not yet processed")
+            
+            # Get chat history
+            chat_history = await cls.get_or_create_chat_history(document_id, user_id, doc.get("mission_id"))
+            
+            # Add user message
+            await cls.add_message(document_id, user_id, "user", question)
+            
+            # Get AI processor
+            ai_processor = get_ai_processor()
+            
+            # Build context
+            context = doc.get("extracted_text", "")[:10000]  # Limit context size
+            history_context = ""
+            
+            if include_history and chat_history.get("messages"):
+                recent_messages = chat_history["messages"][-6:]  # Last 3 exchanges
+                history_context = "\n".join([
+                    f"{msg['role']}: {msg['content']}" 
+                    for msg in recent_messages
+                ])
+            
+            # Generate answer
+            answer = ai_processor.answer_document_question(
+                question=question,
+                document_context=context,
+                chat_history=history_context
+            )
+            
+            # Add assistant message
+            await cls.add_message(document_id, user_id, "assistant", answer)
+            
+            logger.info(f"✅ Generated answer for document {document_id}")
+            return {
+                "answer": answer,
+                "sources": [doc.get("name")],
+                "timestamp": datetime.utcnow()
+            }
+        
+        except Exception as e:
+            logger.error(f"❌ Error answering question: {e}")
+            raise
+    
+    @classmethod
+    async def get_chat_history(cls, document_id: str, user_id: str) -> dict:
+        """Get chat history for a document"""
+        try:
+            chat = await cls.get_or_create_chat_history(document_id, user_id)
+            return chat
+        
+        except Exception as e:
+            logger.error(f"❌ Error getting chat history: {e}")
+            raise
+
+
 document_service = DocumentService()
+chat_service = ChatService()

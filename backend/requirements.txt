@@ -1,33 +1,54 @@
-# SentinelOps-Nexus Backend Dependencies - Phase 1
-
-# FastAPI Framework
+# Web Framework & Server
 fastapi
 uvicorn[standard]
-python-multipart
 
-# Database
-motor                    # Async MongoDB driver
-pymongo                  # MongoDB utilities
+# Data Validation & Settings
+pydantic
+pydantic-settings
+email-validator
+
+# Database - MongoDB Async Driver
+motor
+pymongo
+
+# API Request/Response Handling
+python-multipart
+httpx
+aiofiles
 
 # Authentication & Security
-python-jose[cryptography]  # JWT tokens
-passlib[bcrypt]          # Password hashing
-bcrypt                   # Bcrypt support
+python-jose
+cryptography
+passlib[argon2]>=1.7.4
+argon2-cffi>=21.3.0
+qrcode
+PyPDF2
+pdf2image
+pytesseract
+Pillow
 
-# QR Code Generation
-qrcode[pil]              # QR code generation
-Pillow                  # Image processing
+# AI/ML & Vector Database
+# Using Ollama (no additional dependencies needed, runs locally)
+langchain
+langchain-core
+chromadb
+requests  # For Ollama API calls
 
-# Configuration
-pydantic                 # Data validation
-pydantic-settings        # Settings management
-python-dotenv            # Environment variables
+# Phase 3: 2FA & Biometric
+pyotp>=2.9.0
+# For biometric: libfaceapi, deepface, etc. (integrate as needed)
 
-# Utilities
-python-dateutil          # Date utilities
+# Phase 4: Notifications & WebSocket
+websockets
+aiosmtplib
 
-# Development Tools (Optional)
-pytest                   # Testing
-pytest-asyncio          # Async testing
-httpx                   # HTTP client for testing
-dnspython
+# Data Export
+openpyxl
+pandas
+
+# Environment & Configuration
+python-dotenv
+
+# Additional utilities
+typing-extensions
+pyotp
