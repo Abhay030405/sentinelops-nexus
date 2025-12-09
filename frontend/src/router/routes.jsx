@@ -1,0 +1,126 @@
+import { Navigate } from 'react-router-dom';
+import ProtectedRoute from '../components/ProtectedRoute';
+
+// Core Pages
+import Login from '../pages/Login';
+import AgentDashboard from '../pages/AgentDashboard';
+import TechnicianDashboard from '../pages/TechnicianDashboard';
+import AdminDashboard from '../pages/AdminDashboard';
+
+// Phase 1 Pages
+import KnowledgeCrystal from '../pages/KnowledgeCrystal';
+import DocSage from '../pages/DocSage';
+
+// Phase 3 & 4 Pages
+import NotificationCenter from '../pages/NotificationCenter';
+
+// Ranger Module Pages
+import OpsPlanner from '../pages/OpsPlanner';
+import FacilityOps from '../pages/FacilityOps';
+
+export const routes = [
+  // Public Routes
+  { path: '/login', element: <Login /> },
+
+  // Admin Routes
+  {
+    path: '/admin/dashboard',
+    element: (
+      <ProtectedRoute requiredRole="admin">
+        <AdminDashboard />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: '/admin/overview',
+    element: (
+      <ProtectedRoute requiredRole="admin">
+        <AdminDashboard />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: '/admin/users',
+    element: (
+      <ProtectedRoute requiredRole="admin">
+        <AdminDashboard />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: '/admin/create-ranger',
+    element: (
+      <ProtectedRoute requiredRole="admin">
+        <AdminDashboard />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: '/admin/ops-planner',
+    element: (
+      <ProtectedRoute requiredRole="admin">
+        <AdminDashboard />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: '/admin/facility-ops',
+    element: (
+      <ProtectedRoute requiredRole="admin">
+        <AdminDashboard />
+      </ProtectedRoute>
+    ),
+  },
+
+  // Agent/Ranger Dashboard
+  {
+    path: '/agent/dashboard',
+    element: (
+      <ProtectedRoute requiredRole="agent">
+        <AgentDashboard />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: '/ranger/dashboard',
+    element: (
+      <ProtectedRoute>
+        <AgentDashboard />
+      </ProtectedRoute>
+    ),
+  },
+
+  // Technician Dashboard
+  {
+    path: '/technician/dashboard',
+    element: (
+      <ProtectedRoute requiredRole="technician">
+        <TechnicianDashboard />
+      </ProtectedRoute>
+    ),
+  },
+
+  // Phase 1 Routes
+  {
+    path: '/knowledge',
+    element: (
+      <ProtectedRoute>
+        <KnowledgeCrystal />
+      </ProtectedRoute>
+    ),
+  },
+
+  // Ranger Module Routes
+  { path: '/facility-ops', element: <ProtectedRoute><FacilityOps /></ProtectedRoute> },
+  { path: '/ops-planner', element: <ProtectedRoute><OpsPlanner /></ProtectedRoute> },
+  { path: '/ranger/ops-planner', element: <ProtectedRoute><OpsPlanner /></ProtectedRoute> },
+  { path: '/ranger/facility-ops', element: <ProtectedRoute><FacilityOps /></ProtectedRoute> },
+  { path: '/doc-sage', element: <ProtectedRoute><DocSage /></ProtectedRoute> },
+
+  // Notifications
+  { path: '/notifications', element: <ProtectedRoute><NotificationCenter /></ProtectedRoute> },
+
+  // Default Routes
+  { path: '/', element: <Navigate to="/login" replace /> },
+  { path: '*', element: <Navigate to="/login" replace /> },
+];

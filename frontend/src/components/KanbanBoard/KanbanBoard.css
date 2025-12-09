@@ -1,0 +1,156 @@
+.kanban-board {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  padding: 20px;
+  background: #0f0f1e;
+  border-radius: 12px;
+  min-height: 600px;
+}
+
+.kanban-column {
+  display: flex;
+  flex-direction: column;
+  background: #1a1a2e;
+  border-radius: 8px;
+  border: 1px solid #2d2d44;
+  overflow: hidden;
+}
+
+.kanban-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px;
+  background: #16213e;
+  border-bottom: 2px solid #2d2d44;
+}
+
+.kanban-header h3 {
+  margin: 0;
+  color: #00d4ff;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.issue-count {
+  background: #2d2d44;
+  color: #00d4ff;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.kanban-content {
+  flex: 1;
+  padding: 12px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.kanban-card {
+  background: #0f0f1e;
+  border: 1px solid #2d2d44;
+  border-radius: 6px;
+  padding: 12px;
+  cursor: move;
+  transition: all 0.2s ease;
+  color: #e0e0ff;
+  user-select: none;
+}
+
+.kanban-card:hover {
+  border-color: #00d4ff;
+  box-shadow: 0 0 12px rgba(0, 212, 255, 0.2);
+}
+
+.kanban-card.completed-card {
+  opacity: 0.7;
+  border-color: #4caf50;
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  margin-bottom: 8px;
+}
+
+.card-header h4 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #ffffff;
+  flex: 1;
+}
+
+.priority-badge {
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-weight: 600;
+  text-transform: uppercase;
+  white-space: nowrap;
+  margin-left: 8px;
+}
+
+.priority-high {
+  background: #ff4444;
+  color: white;
+}
+
+.priority-medium {
+  background: #ffaa00;
+  color: white;
+}
+
+.priority-low {
+  background: #4caf50;
+  color: white;
+}
+
+.card-description {
+  margin: 8px 0 0 0;
+  font-size: 12px;
+  color: #b0b0c0;
+  line-height: 1.4;
+}
+
+.card-footer {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #2d2d44;
+}
+
+.assigned-to {
+  font-size: 11px;
+  color: #00d4ff;
+}
+
+.empty-state {
+  text-align: center;
+  color: #666;
+  padding: 40px 20px;
+  margin: 0;
+  font-style: italic;
+}
+
+.kanban-board::-webkit-scrollbar {
+  width: 6px;
+}
+
+.kanban-board::-webkit-scrollbar-track {
+  background: #1a1a2e;
+}
+
+.kanban-board::-webkit-scrollbar-thumb {
+  background: #2d2d44;
+  border-radius: 3px;
+}
+
+.kanban-board::-webkit-scrollbar-thumb:hover {
+  background: #00d4ff;
+}
